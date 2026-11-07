@@ -1,0 +1,52 @@
+# ───────────────────────────────────────────────
+# 오목 로봇 설정 파일
+# 경로는 프로젝트 폴더(이 파일이 있는 곳) 기준 상대경로
+# ───────────────────────────────────────────────
+
+board:
+  n: 8              # 한 변의 선(교차점) 개수. 모델 best_policy_8_8_5 와 맞춰야 함
+  n_in_row: 5       # 몇 목이면 승리
+  cell: 60          # 보정 이미지에서 칸 간격(px)
+  margin: 40        # 보정 이미지 가장자리 여백(px)
+
+camera:
+  source: 0         # 카메라 번호(0, 1, ...) 또는 이미지 파일 경로 (테스트용)
+  width: 1280
+  height: 720
+  preview_fps: 15   # GUI 미리보기 갱신 속도
+
+vision:
+  patch_ratio: 0.35     # 돌 판별 패치 반지름 = cell * patch_ratio
+  stable_frames: 10     # 같은 판 상태가 몇 프레임 연속이면 '확정'으로 볼지
+  hand:
+    method: diff        # diff | mediapipe (mediapipe 는 pip install mediapipe 필요)
+    diff_threshold: 40  # 기준 이미지 대비 밝기 차이(0~255) 이상이면 변화 픽셀
+    blob_cells: 2.0     # 변화 덩어리가 칸 넓이의 이 배수보다 크면 손으로 판단
+    motion_ratio: 0.01  # 직전 프레임 대비 변화 픽셀 비율이 이보다 크면 움직임(손)으로 판단
+
+ai:
+  model: ai/alphazero/best_policy_8_8_5.model
+  n_playout: 400    # 클수록 강하지만 느림
+  c_puct: 5
+
+game:
+  human_first: true     # true: 사람이 흑(선공), false: 로봇이 흑(선공)
+  verify_robot: true    # 로봇이 놓은 돌을 카메라로 확인할지
+  verify_timeout: 20    # 로봇 돌 확인 제한 시간(초)
+  save_logs: true       # 매 수마다 logs/ 에 사진과 판 상태 저장
+
+robot:
+  driver: mock          # mock | custom  (custom = robot/arm.py 의 CustomArm 을 여러분 SDK로 구현)
+  port: COM3            # 시리얼 포트 등 (SDK에 따라 사용)
+  speed: 50
+  z_safe: 60.0          # 이동할 때 높이(mm)
+  z_place: 10.0         # 돌을 놓는 높이(mm)
+  z_pick: 10.0          # 돌을 집는 높이(mm)
+  home: [150.0, 0.0, 120.0]       # 대기 위치 [x, y, z]
+  stone_supply: [200.0, -150.0]   # 로봇 돌 통 위치 [x, y]
+
+paths:
+  grid_H: calib/grid_H.npy
+  stone_model: calib/stone_thresholds.json
+  robot_board: calib/robot_board.json
+  log_dir: logs
