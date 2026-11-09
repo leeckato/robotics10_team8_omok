@@ -56,6 +56,7 @@ logs/                매 수 사진 + 판 상태
 `config.yaml` 에서 `robot.driver: custom` 으로 바꾸세요. 나머지 코드는 수정할 필요가 없습니다.
 
 ## 좌표 규칙
+<img width="531" height="533" alt="image" src="https://github.com/user-attachments/assets/a5848fad-3067-4f29-ad6f-59fd9aea3d68" />
 
 - 보정 이미지 기준 `row` = 위→아래, `col` = 왼쪽→오른쪽, 0부터 시작
 - 판 상태 배열: `0` 빈칸, `1` 흑(선공), `2` 백
