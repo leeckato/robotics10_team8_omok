@@ -54,7 +54,7 @@ class BoardReader:
     def reset(self):
         self._history.clear()
         self._last_stable = None
-        self.hand.reference = None
+        self.hand.reset()
 
     def process(self, frame):
         warped = apply_warp(frame, self.W, self.size)

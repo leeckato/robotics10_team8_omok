@@ -19,10 +19,13 @@ vision:
   patch_ratio: 0.35     # 돌 판별 패치 반지름 = cell * patch_ratio
   stable_frames: 10     # 같은 판 상태가 몇 프레임 연속이면 '확정'으로 볼지
   hand:
-    method: diff        # diff | mediapipe (mediapipe 는 pip install mediapipe 필요)
-    diff_threshold: 40  # 기준 이미지 대비 밝기 차이(0~255) 이상이면 변화 픽셀
-    blob_cells: 2.0     # 변화 덩어리가 칸 넓이의 이 배수보다 크면 손으로 판단
-    motion_ratio: 0.01  # 직전 프레임 대비 변화 픽셀 비율이 이보다 크면 움직임(손)으로 판단
+    method: both        # diff | mediapipe (mediapipe 는 pip install mediapipe 필요)
+    model_path: calib/hand_landmarker.task
+    change_ratio: 0.025
+    clear_seconds: 1.0
+    ignore_shadow: true
+    shadow_min: 0.35
+    shadow_chroma: 0.04
 
 ai:
   model: ai/alphazero/best_policy_8_8_5.model
