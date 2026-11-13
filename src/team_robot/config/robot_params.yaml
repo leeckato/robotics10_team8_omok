@@ -1,0 +1,41 @@
+# board_control/omok_pick_place.py 값을 그대로 옮김 (SPEED_SCALE 1.8, J6 +90도)
+team_robot:
+  ros__parameters:
+    # robot_mode 는 launch 인자로 (기본 dry = 로봇 안 움직임, 실제 이동은 robot_mode:=real)
+    ns: dsr01
+    grid_json: "~/ros2_ws/board_control/grid_robot_coordinates.json"   # launch 로 켜면 launch 인자 grid_json 이 우선
+    board_revision: 1           # 로봇 좌표를 확인한 비전 board_revision (비전 노드는 1부터 시작)
+
+    # ── 자세 / 속도 ──
+    rotation: [4.9588, 179.5272, 94.7379]       # 직선 이동 자세 (4.7379 + J6 90도)
+    home_joint: [0.0, 0.0, 90.0, 0.0, 90.0, 90.0] # 준비 자세
+    vel: 90.0                   # 직선 속도 mm/s (50 x 1.8)
+    vel_rot: 54.0               # 30 x 1.8
+    acc: 90.0
+    acc_rot: 54.0
+    joint_vel: 36.0             # 20 x 1.8
+    joint_acc: 36.0
+
+    # ── 높이 / 공급 위치 (mm, BASE) ──
+    lift: 30.0                  # 이동 높이 = 격자 Z + lift (대기 위치 Z 도 (0,0) Z + lift)
+    place_z: 145.0              # 놓기 Z
+    pick_z: 140.0               # 집기 Z
+    min_z: 139.0                # 이보다 낮은 목표 거부
+    supply_x: 273.4
+    supply_y: -81.6
+    pos_tol: 3.0                # 이동 후 실측 오차 허용, 대기 위치 판정 (mm)
+
+    # ── 그리퍼 ──
+    gripper_mode: drl           # drl: gripper_drl.py (omok_pick_place --gripper real) / topic: /dsr01/gripper/position_cmd / sim / none
+    gripper_drl: "~/ros2_ws/gripper/gripper_drl.py"
+    gripper_topic: /dsr01/gripper/position_cmd
+    grip_close: 630             # 잡기
+    grip_open: 550              # 놓기
+    grip_wait_pos: 450          # 대기 위치 복귀 후
+    grip_wait_sec: -1.0         # 그리퍼 명령 후 대기. -1 = 자동 (drl/sim 1.0초, topic 2.5초)
+
+    # ── 기타 ──
+    auto_standby: true          # 로봇 차례인데 대기 위치가 아니면 준비 자세 -> 공급 위치 위로 자동 이동 (사람 차례에는 안 움직임)
+    call_timeout_sec: 60.0
+    dry_place_wait_sec: 10.0    # dry 모드: 로봇 대신 사람이 돌을 놓을 시간
+    rviz_place_cmd: true        # 착수 성공 시 /omok/place_cmd 로 RViz(omok_supply_rviz.py)에 표시

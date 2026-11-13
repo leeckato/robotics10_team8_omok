@@ -1,0 +1,4 @@
+uint8 human_color
+---
+bool accepted
+string message

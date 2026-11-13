@@ -1,0 +1,7 @@
+team_algorithm:
+  ros__parameters:
+    alphazero_path: ""                       # 비우면 패키지에 든 모델 사용. 다른 복사본을 쓰려면 경로 (예: ~/AlphaZero_Gomoku)
+    model_file: "best_policy_8_8_5.model"     # alphazero_path 안의 파일 (절대 경로도 가능)
+    n_playout: 400                            # MCTS 탐색 횟수. 클수록 강하지만 느림 (omok_game.py 기본값과 같음)
+    c_puct: 5.0
+    time_warn_sec: 10.0                       # 계산이 이보다 오래 걸리면 경고 (게임 제어 응답 제한 15초)

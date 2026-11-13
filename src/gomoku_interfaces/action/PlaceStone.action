@@ -1,0 +1,14 @@
+string game_id
+uint32 turn_id
+string request_id
+uint8 row
+uint8 col
+uint8 color
+uint32 board_revision
+---
+bool success
+bool returned_to_standby
+string request_id
+string error
+---
+string stage

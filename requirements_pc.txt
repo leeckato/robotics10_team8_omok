@@ -1,0 +1,4 @@
+PySide6>=6.6,<7
+numpy>=1.24
+opencv-contrib-python>=4.8,<5   # 4.8 이상: 손 감지 모델(readNetFromTFLite)
+pyrealsense2>=2.54

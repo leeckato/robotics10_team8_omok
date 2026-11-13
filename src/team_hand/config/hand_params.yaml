@@ -1,0 +1,31 @@
+team_hand:
+  ros__parameters:
+    # ── 발행 ──
+    publish_hz: 15.0          # 규격 권장 10~30Hz
+    stale_sec: 0.5            # 원본 영상이 이보다 오래되면 valid=false (규격)
+    debug_image: false        # true 면 /hand/debug_image 로 판정 화면 발행 (2Hz)
+    max_process_hz: 15.0      # 초당 검사 횟수 상한 (비전 노드 영상은 10Hz 라 보통 영상마다 검사)
+    cv_threads: 1             # OpenCV 스레드 수. 같은 PC 의 비전 노드/GUI 몫을 남김 (0 = OpenCV 기본값)
+
+    # ── 검사 영역 ──
+    roi_mode: marker          # marker: 비전 노드와 같은 보정 파일 + ArUco 4개 (기본)
+                              # grid: 그리드 직접 검출 / full: 영상 전체(보수적) / polygon: 좌표 지정
+    # calibration 은 launch 인자로 넘김 (기본 ~/.config/gomoku/marker_calibration.json, gomoku.launch.py 와 동일)
+    marker_lost_sec: 5.0      # 마커 4개가 이보다 오래 안 보이면 valid=false (그 전에는 마지막 위치로 검사)
+    roi_polygon: ""           # polygon 일 때 원본 픽셀 좌표 "x1,y1 x2,y2 x3,y3 x4,y4"
+    grid_n: 8                 # grid 모드용 (marker 모드는 보정 파일의 n 사용)
+    margin_cells: 0.6         # 격자 바깥 0.6칸까지 (비전 노드 vision.py 의 margin 24px / 간격 40px 와 동일)
+    grid_refresh_sec: 5.0     # grid 모드: 손이 없을 때 이 주기로 판 위치 재확인
+    grid_move_px: 3.0         # 판이 3px 이상 움직였으면 영역 갱신 (비전 노드 board_revision 기준과 동일)
+
+    # ── 판정 ──
+    method: both              # both: 손 모델 + 변화 감지(물체도 잡음) / model: 손만 / diff: 변화 감지만
+    hand_model: opencv        # opencv(기본, MediaPipe 불필요) / auto / mediapipe
+    palm_score: 0.5           # 손 모델 기준. 오검출 있으면 0.6~0.7, 손을 놓치면 0.4
+    change_ratio: 0.025       # 판 영역의 2.5% 이상 바뀌면 감지
+    motion_ratio: 0.005
+    hand_frames: 2            # 연속 2번 감지 -> 손 있음
+    clear_seconds: 0.3        # 감지 없음이 이만큼 지속 -> 손 없음 (3초 대기는 게임 제어가 함)
+    ignore_shadow: true
+    shadow_min: 0.35
+    shadow_chroma: 0.04

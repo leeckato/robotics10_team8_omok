@@ -1,0 +1,5 @@
+int8[64] board
+uint16 off_grid_count
+---
+bool accepted
+string message

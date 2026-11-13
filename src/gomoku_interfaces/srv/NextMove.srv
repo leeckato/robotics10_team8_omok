@@ -1,0 +1,13 @@
+string game_id
+uint32 turn_id
+string request_id
+int8[64] board
+uint8 to_play
+---
+string game_id
+uint32 turn_id
+string request_id
+bool success
+int16 row
+int16 col
+string error

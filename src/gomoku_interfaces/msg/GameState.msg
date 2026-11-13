@@ -1,0 +1,12 @@
+builtin_interfaces/Time stamp
+string game_id
+uint32 turn_id
+string phase
+int8[64] board
+uint8 human_color
+uint8 to_play
+uint8 winner
+int16 last_row
+int16 last_col
+bool simulation
+string notice
