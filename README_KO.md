@@ -1,149 +1,146 @@
-# 오목 ROS 2 패키지 / Ubuntu 24.04 + ROS 2 Jazzy 목표
+# 오목 실물 실행 통합본
 
-## 제공 범위와 검증 상태
-GUI/비전/게임 제어를 실제 rclpy 노드로 분리한 소스 패키지입니다.
-같은 공통 메시지를 사용하는 팀원 연결 템플릿과 모의 노드를 제공합니다.
-이 제작 환경에는 ROS 2가 설치돼 있지 않아 colcon 빌드나 DDS/액션 실행은 검증하지 못했습니다.
-Python 구문/패키지 메타데이터와 테스트 21개를 확인했습니다. 게임·합성 영상 13개, 가짜 ROS 의존성으로 제어 클래스 로직을 실행한 테스트 8개입니다. 후자는 실제 ROS 통신 시험이 아닙니다.
-Ubuntu PC에서 아래 빌드 및 모의 통합 시험을 먼저 수행해야 합니다.
-기존 팀 AI/두산 드라이버/손 검출기는 들어 있지 않습니다. mock_peers는 통신 시험만 위한 가짜 상대입니다.
+백돌 객체 검출 v4와 최신 로봇/게임 진행 수정을 한 작업공간으로 묶었습니다.
+8x8 격자, 실제 RealSense 영상, GUI, 게임제어, 손 감지, 기존 AlphaZero 모델,
+두산 E0509 로봇 제어, DRL 그리퍼가 포함됩니다.
+ROS2 통신을 위해 gomoku_interfaces/gomoku_system/team_hand/team_algorithm/team_robot 5개 패키지는 유지합니다.
+테스트 폴더·샘플 실행·mock 노드·영상 재생 시험·사용하지 않는 이전 검출기·백업·진단 사진은 제외했습니다.
+모델 파일, 라이선스, 좌표, 설정과 마커/빈 판 보정 도구는 실행에 필요하여 포함했습니다.
+빌드 결과 build/install/log는 PC에서 새로 생성합니다.
 
-## 구성
-src/gomoku_interfaces : 팀 전체가 공유할 msg/srv/action 정의 (ament_cmake).
-src/gomoku_system : GUI, 비전, 게임 제어, 관리자 CLI, 모의 상대 (ament_python).
-team_templates : 팀원 패키지로 복사해 실제 기능을 연결할 예제.
-TEAM_INTERFACES_KO.md : 담당별 통신 규격과 필수 동작.
+## 최초 설치 (현재 사용 중인 Ubuntu PC)
 
-8×8 교차점, row/col=0~7, 64개 행 우선 배열, 0 빈칸 /1 흑 /2 백 /-1 불확실.
-마커 ID와 최초 등록 방향으로 좌표를 유지합니다.
-승패는 금수 없음/5개 이상 연속 승리입니다. 기존 AI와 규칙을 맞춰야 합니다.
-
-## 1. PC에 복사하고 환경 준비
-압축 안 gomoku_ros2 폴더를 ~/ros2_ws 와 별개 경로에 두거나 src 안의 두 패키지만 기존 ~/ros2_ws/src 에 복사하세요.
-아래는 두 패키지를 기존 워크스페이스에 넣은 기준입니다.
-중복된 동일 이름 패키지를 다른 하위 폴더에 다시 넣지 마세요.
+기존 게임/검출 실행을 종료하고 새 터미널에서 아래를 실행합니다.
+기존 ~/omok_integrated와 별도 폴더를 사용하여 이전 테스트/설치 파일이 섞이지 않습니다.
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-cd ~/ros2_ws
-rosdep install --from-paths src --ignore-src -r -y --rosdistro jazzy
+unzip -o ~/Downloads/omok_runtime_final.zip -d ~
+bash ~/omok_runtime/scripts/build.sh
 ```
 
-ROS의 rclpy와 같은 시스템 Python(일반적인 Jazzy Ubuntu 24.04는 Python 3.12)을 사용하세요.
-기존 vision 가상환경에 rclpy가 없으면 그대로 사용하지 마세요.
-GUI/카메라 의존성은 system-site-packages 가상환경으로 설치하는 방법을 제공합니다:
+기존 /opt/ros/jazzy, ~/ros2_ws의 두산 드라이버, ~/gomoku_ros_env를 사용합니다.
+이 압축에는 ROS2와 두산 드라이버 자체는 포함하지 않습니다.
+기존 ~/.config/gomoku/marker_calibration.json 및 빈 판 기준을 그대로 사용합니다.
+설정이 전혀 없는 경우에만 마지막으로 업로드한 카메라 설정/기준을 복원합니다.
+다른 PC나 카메라 배치에서는 그 환경에 맞게 보정해야 합니다.
+
+## 전체 실행
+
+터미널 1 (기존 bringup이 켜져 있으면 중복 실행하지 않음):
 
 ```bash
-/usr/bin/python3 -m venv --system-site-packages ~/gomoku_ros_env
-source ~/gomoku_ros_env/bin/activate
-python3 -m pip install -r /실제/압축을푼경로/gomoku_ros2/requirements_pc.txt
-python3 -c "import rclpy,cv2,PySide6,pyrealsense2; print(cv2.__version__); assert hasattr(cv2.aruco,'ArucoDetector')"
+bash ~/omok_runtime/scripts/run_bringup.sh
 ```
 
-venv가 없으면 Ubuntu python3-venv 패키지가 필요합니다. 모의 실행만 할 때는 pyrealsense2 없이 PySide6만으로 GUI를 시험할 수 있고, 비전 테스트는 numpy/OpenCV도 필요합니다.
-여러 pip OpenCV 변종을 함께 설치하지 마세요. Ubuntu OpenCV와 pip 버전이 다르면 이 전용 환경에서 실제 import 버전을 확인하세요.
-
-## 2. 빌드
-현재 환경에 colcon이 없다면 python3-colcon-common-extensions가 필요합니다.
-실행 파일이 ROS를 볼 수 있는 Python으로 생성되도록 아래처럼 Python을 명시합니다.
+터미널 2:
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-source ~/gomoku_ros_env/bin/activate
-cd ~/ros2_ws
-python3 "$(command -v colcon)" build --symlink-install --packages-up-to gomoku_system --cmake-args -DPython3_EXECUTABLE="$(command -v python3)"
-source install/setup.bash
+bash ~/omok_runtime/scripts/run_real.sh true
 ```
 
-별도 터미널에서도 ROS → 가상환경 → 워크스페이스를 같은 순서로 source 하세요.
+GUI에서 연결과 빈 판 확인 후 선후공을 선택하고 시작합니다.
+실제 로봇 모드이며 게임 시작/대기 위치 이동 요청에 따라 실제로 움직입니다.
+판/공급 위치와 비전 행·열 방향은 로봇 좌표에 맞아야 합니다.
+기존 작업공간 게임·로봇 노드를 동시에 실행하지 않습니다.
 
-## 3. 카메라/로봇 없는 전체 모의 실행
-```bash
-ros2 launch gomoku_system gomoku.launch.py simulation:=true mock_peers:=true
-```
+## 좌표
 
-GUI에서 사용자 선후공 선택 → 시작.
-사용자 차례: 모의 편집 색 선택 → 중앙 판 클릭 → 검사 요청 → 3초 대기.
-정상 착수 후 mock 알고리즘은 첫 빈칸을 선택하고 mock 로봇은 약 1초 후 모의 관측 판을 갱신합니다.
-게임 제어가 결과를 재검사한 뒤 GUI에 반영하고 사용자 턴으로 돌아갑니다.
-이 가짜 알고리즘은 기존 오목 AI가 아니며 성능 비교 대상도 아닙니다.
-두 돌/다른 색/기존 돌 제거/격자 밖 후보를 시험하면 확정 판을 유지하고 경고해야 합니다.
-기존 돌은 모의 지우기 후 원위치에 복원하세요. mock 노드와 실제 팀 노드를 동시에 켜면 안 됩니다.
+src/team_robot/robot_assets/grid_robot_coordinates.json은 사용자가 마지막으로 준 64칸 표입니다.
+(0,0) = [248.398, -16.625, 163.258]
+(7,7) = [598.398, 333.37, 163.225]
+이전 표 대비 보드 Y가 -5mm 이동했습니다. 소수 좌표는 JSON 숫자로 저장했습니다.
+공급 위치는 별도 설정이며 기존 X=273.4,Y=-81.6 유지. 집기 Z는 요청대로 157mm로 변경, 놓기 Z=140 유지.
+표의 z 약163mm는 기존 코드대로 이동 상부 높이 계산에 사용되고 실제 놓기 높이는 place_z=142입니다.
+전체 launch는 패키지에 설치된 좌표·그리퍼 파일을 자동 사용합니다.
+따라서 이전 ~/ros2_ws/board_control 경로를 별도로 넘기지 않습니다.
+로봇 설정: src/team_robot/config/robot_params.yaml.
 
-기본 mock_peers:=false이므로 팀원이 없어도 GUI/비전은 켜지지만 로봇 턴에서 연결을 기다립니다.
+## 카메라 보정
 
-## 4. 마커 최초 등록과 기준 색 (카메라 독점)
-게임 launch를 먼저 종료하세요. 카메라는 한 프로그램만 열어야 합니다.
-인쇄물은 src/gomoku_system/tools/PRINT_MARKERS.html. 100%로 인쇄해 흰 여백 포함 부착.
-ID0 좌상, ID1 우상, ID2 우하, ID3 좌하, 보드 바깥의 같은 평면에 보드와 함께 고정하세요.
+게임을 종료하여 카메라를 비운 후, 현재 기준으로 검출 확인:
 
 ```bash
-mkdir -p ~/.config/gomoku
-ros2 run gomoku_system calibrate --calibrate --config "$HOME/.config/gomoku/marker_calibration.json"
+bash ~/omok_runtime/scripts/run_calibrate.sh
 ```
-F 고정 → 격자의 좌상/우상/우하/좌하 교차점 클릭 → S 저장.
-그 다음 기준 색 등록:
+
+마커 위치를 실제로 바꾼 경우에만:
+
 ```bash
-ros2 run gomoku_system calibrate --config "$HOME/.config/gomoku/marker_calibration.json"
+bash ~/omok_runtime/scripts/run_calibrate.sh --calibrate --grid-size 8
 ```
-실제 흑돌과 백돌을 놓고 B → 흑돌 내부 클릭, W → 백돌 내부 클릭. 색은 즉시 설정에 저장됩니다. Q 종료.
-한 번 등록 후에는 평소 이 도구를 실행할 필요 없습니다.
-관리자 GUI를 ROS 안에 중복 구현하지 않고 이 별도 등록 창으로 분리했습니다.
 
-## 5. 실제 카메라 실행 (로봇 자동 연결 안 함)
+창에서 f -> 왼쪽 위/오른쪽 위/오른쪽 아래/왼쪽 아래의 격자 끝 교차점 클릭 -> s.
+이후 일반 보정 실행에서 모든 돌/손/팔을 치우고 e 두 번으로 빈 판 저장, q 종료.
+단순 코드 업데이트 시에는 마커/빈 판을 다시 찍지 않습니다.
+외곽선은 네 방향 모두 같은 연결 여유를 적용합니다.
+
+## 검증 범위
+
+Python/셸/XML 구문, 실행 진입점/설치 파일 경로, 64칸 좌표와 모든 이동 계획,
+실제 사진 회귀 검사를 확인했습니다. 시험 코드는 배포물에 포함하지 않습니다.
+이 실행 환경에는 ROS2와 로봇이 없어 colcon 빌드·실시간 카메라·실물 동작은 직접 검증하지 못했습니다.
+
+## 판 오류 수정 후 자동 재진행
+
+두 개 착수/잘못된 색/기존 돌 변경/격자 밖 돌 등 판 오류는 수정 대기 상태로 전환됩니다.
+올바른 한 수로 고치거나 기존 판으로 복원한 뒤 손을 빼면, 3초간 안정 관측 후 새 검사 요청으로 재확인합니다.
+정상 한 수는 확정 후 다음 차례로, 원래 판 복원은 사용자 차례로 돌아갑니다.
+로봇 복귀 후의 판 불일치도 새 영상으로만 다시 확인하며 로봇 착수를 재실행하지 않습니다.
+실제 로봇 동작 실패/응답 불명확, 보드 좌표 변경은 자동 이동 재시도 대상이 아닙니다.
+현재 집기 높이는 157mm, 놓기 높이는 140mm입니다.
+
+
+## 백돌 객체 검출 v4
+
+실제 카메라 경로에서 백돌은 격자선 가림 비율로 확정하지 않습니다.
+1. 마커 기반으로 판을 정규화하고 빈 판과의 지역 조명 비율을 보정합니다.
+2. 얇은 인쇄 격자선을 형태학적 닫힘으로 억제합니다.
+3. 검정돌 마스크를 제외하고 돌 크기의 밝은 표면을 top-hat으로 추출합니다.
+4. 빈 판에도 있는 무늬를 주변 범위까지 비교해 억제하고, 영상 전체에서 표면 점수의 봉우리를 찾습니다.
+5. 후보 표면의 면적/변화 증거를 확인한 뒤 가까운 교차점에 연결합니다.
+6. 백돌은 6회 연속 또는 최근 7프레임 중 5회 이상+마지막 2회 연속 관측으로 확정합니다.
+화면 유지와 새 관측 유효성은 구분합니다. 5회 연속 부재로 제거를 확인하는 동작은 유지합니다.
+검출 확인 실행과 전체 실행 로그에 Detector: white_objects_v4가 표시됩니다.
+이전 빈 판 기준 파일은 그대로 사용합니다. 코드 업데이트만으로 E를 눌러 재등록하지 않습니다.
+
+제공된 실제 인접/비껴남 사진들과 빈 판, 밝기/미세이동 변형 및 합성 연속 입력으로 검사했습니다.
+이는 실시간 카메라 검증을 대신하지 않습니다. 원래 돌과 종이가 거의 같은 색인 조건에서는
+표면/그림자 대비가 충분하지 않거나 팔에 가려질 때 여전히 미검출할 수 있습니다.
+
+검출 확인(게임을 종료해 카메라를 비운 상태):
 ```bash
-ros2 launch gomoku_system gomoku.launch.py simulation:=false mock_peers:=false use_hand:=false
+bash ~/omok_runtime/scripts/run_calibrate.sh
 ```
-비전 노드가 카메라를 열고 GUI는 영상 토픽을 구독합니다. app.py를 추가 실행하지 마세요.
-빈 판 확인 → 게임 시작 → 사용자 착수 → 수동 검사 요청.
-로봇 턴에서는 실제 알고리즘/로봇 노드가 없으면 대기합니다.
-use_hand:=false는 수동 검사 모드이며 자동 손 이탈 검출이 아닙니다.
-손 담당 노드가 붙으면 use_hand:=true 로 실행하세요. 유효한 손 진입/이탈 신호와 3초 연속 없음이 필요합니다.
-
-GUI 없이 검출만 실행:
+q로 닫은 후 전체 실행:
 ```bash
-ros2 launch gomoku_system gomoku.launch.py simulation:=false gui:=false
-ros2 topic echo /vision/observation
+bash ~/omok_runtime/scripts/run_real.sh true
 ```
+현재 집기 Z=157mm, 놓기 Z=140mm, 사용자 제공 64칸 좌표 및 판 수정 후 자동 재진행은 유지합니다.
 
-## 6. 실제 팀원 연결
-각 팀원은 gomoku_interfaces를 같은 버전으로 빌드합니다.
-알고리즘: /algorithm/next_move 서비스 서버.
-로봇: /robot/place_stone 액션 서버 + /robot/status 발행.
-손: /vision/image_raw 구독 → /vision/hand_state 발행.
-GUI/비전/게임 제어는 이 패키지 launch로 실행. 팀원 노드는 각자 패키지에서 실행하거나 최종 launch에 추가.
-두산 드라이버는 로봇 담당자가 기존에 검증한 명령으로 별도 실행합니다. 모델/IP/드라이버 버전을 임의 지정하지 않았습니다.
-다른 PC로 나눌 경우 동일 ROS_DOMAIN_ID와 DDS 네트워크/시간 동기화가 필요합니다. 우선 같은 PC에서 통합하세요.
+## 최종 로봇 설정
 
-## 7. 동작 보류와 복구
-- 유효하지 않은 관측/마커 누락/오래된 영상은 착수 확정에 사용하지 않습니다.
-- 이전 게임/턴/요청 응답은 거부합니다.
-- 동작 요청 후 120초, 알고리즘/요청 응답 15초, 판 확인 8초를 초기 시간 제한으로 사용합니다.
-- 오류 시 자동 재착수하지 않습니다. 실제 판/로봇 상태를 확인해야 합니다.
-- 동작 여부가 불명확한 액션 핸들이 남아 있으면 게임 종료도 거부합니다. 로봇 담당이 실제 상태 확인 후 노드를 재기동해 복구하세요.
-- ERROR에서 로봇이 대기 상태로 확인되고 미완료 핸들이 없으면 게임 종료 → 빈 판 → 새 게임.
-- 보드 좌표 revision이 바뀌면 로봇 좌표 재확인이 필요합니다. 실제 로봇 노드는 관측 revision을 무조건 복사하면 안 됩니다.
-- revision은 프로세스 실행 내 번호입니다. 재기동 시 초기화되므로 로봇 좌표 검증도 다시 수행해야 합니다.
+- 공급 돌 집기 Z: 157mm.
+- 판에 놓기 Z: 140mm (이전 142mm보다 2mm 낮음).
+- 목표 교차점 위로 운반하는 MOVING 구간: 150mm/s, 가속도 90mm/s².
+- 착수 때 그리퍼 목표 위치: 630에서 550까지 20단계, 명시적 단계 대기 합계 2.5초 + 통신 응답 시간.
+- 놓은 뒤 상승/복귀 및 공급 하강/집기 상승: 기존 90mm/s와 가속도 유지.
 
-## 8. 검출의 현실적 제한
-실제 카메라/돌은 아직 미검증입니다. 원 후보 미검출은 진짜 빈칸과 완벽히 구분되지 않습니다.
-연속 5프레임 일치는 일관성 검사이며 검출 정확도 보장은 아닙니다.
-격자 바깥 약 0.6칸 여백까지만 검사합니다. 판 전체 공간의 모든 물체를 찾는 기능은 아닙니다.
-마커 하나 누락/큰 보드 이동 중 검사 보류. 심한 원근/반사/흰 바닥과 백돌 경계 소실/돌 겹침은 놓칠 수 있습니다.
-렌즈 왜곡 보정은 없습니다. 손 검출은 게임 트리거용이며 실제 로봇 안전 정지를 대신하지 않습니다.
+저속 이탈이나 저속 상승 구간은 추가하지 않았습니다.
+그리퍼 위치 지령을 분할하는 방식이며 실제 모터 움직임은 그리퍼 응답에 따라 달라집니다.
+개방 후 기존 안정 대기는 유지합니다. 기본 DRL 그리퍼 모드에 적용됩니다.
+설정: src/team_robot/config/robot_params.yaml의 pick_z/place_z/carry_vel/grip_release_sec/grip_release_steps.
+명령 생성, 단계별 위치/속도, 64칸 높이를 코드로 확인했으며 실물 검증은 수행하지 못했습니다.
 
-## 9. 확인 명령과 테스트
-```bash
-ros2 node list
-ros2 topic list -t
-ros2 service list -t
-ros2 action list -t
-ros2 interface show gomoku_interfaces/action/PlaceStone
-ros2 topic echo /game/state
-```
+## 편집한 설정을 실제로 읽는 경로
 
-ROS 없는 순수 로직 테스트(소스 경로에서):
-```bash
-PYTHONPATH=src/gomoku_system python3 -m unittest discover -s src/gomoku_system/tests -v
-```
-실제 빌드/실행 확인 후 전체 ROS 통합 검증까지 완료된 것으로 판단하세요.
+run_real.sh는 다음 소스 YAML을 전체 launch의 robot_params 인자로 직접 전달합니다.
+~/omok_runtime/src/team_robot/config/robot_params.yaml
+그리퍼 프로그램도 ~/omok_runtime/src/team_robot/robot_assets/gripper_drl.py를 직접 전달합니다.
+로봇 시작 로그에 설정 경로, pick_z/place_z/carry_vel, 개방 시간/단계, 그리퍼 경로가 표시됩니다.
+
+이번 launch 수정은 한 번 빌드해야 합니다. 이후 YAML 수치만 수정할 때는 빌드 없이
+게임 실행을 Ctrl+C로 종료하고 run_real.sh로 재시작하면 됩니다.
+실행 중인 노드는 시작 시 값을 저장하므로 파일만 저장해도 즉시 바뀌지는 않습니다.
+높이를 바꾸는 곳은 robot_params.yaml의 pick_z/place_z입니다.
+motion.py의 DEFAULTS는 YAML에서 값이 주어지면 사용되지 않는 기본값입니다.
+gripper_drl.py는 손가락 폭을 제어하며 팔의 Z 높이를 정하지 않습니다.

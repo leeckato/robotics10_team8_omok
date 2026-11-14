@@ -20,7 +20,7 @@
          -> 그동안 사람이 로봇 대신 그 칸에 돌을 놓으면 비전 확인까지 전체 흐름 시험 가능
 
 그리퍼 (gripper_mode)
-  drl   : omok_pick_place.py --gripper real 과 같음. python3 gripper_drl.py open|close <값>
+  drl   : omok_pick_place.py --gripper real 과 같음. python3 gripper_drl.py pos <값>
   topic : go8_grip.py / z_grip_z.py 와 같음. std_msgs/Int32 를 /dsr01/gripper/position_cmd 로 발행 (gripper_node mode:=real)
   sim   : /<ns>/gripper/open|close 서비스 (Trigger/Empty/SetBool)
   none  : 그리퍼 동작 없음
@@ -33,6 +33,7 @@ import threading
 import time
 
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
@@ -47,7 +48,8 @@ from team_robot.motion import DEFAULTS, Planner, load_grid
 
 GRIP_DEFAULTS = dict(gripper_mode='drl', gripper_drl='~/ros2_ws/gripper/gripper_drl.py',
                      gripper_topic='/dsr01/gripper/position_cmd',
-                     grip_close=630, grip_open=550, grip_wait_pos=450, grip_wait_sec=-1.0)
+                     grip_close=630, grip_open=550, grip_wait_pos=450, grip_wait_sec=-1.0,
+                     grip_release_sec=2.5, grip_release_steps=20)
 
 
 class MotionError(RuntimeError):
@@ -63,14 +65,18 @@ class RobotNode(Node):
         super().__init__('team_robot')
         self.group = ReentrantCallbackGroup()
         d = lambda name, default: self.declare_parameter(name, default).value   # noqa: E731
+        self.config_source = str(d('config_source', 'ROS parameter input'))
         self.mode = str(d('robot_mode', 'dry'))
         if self.mode not in ('real', 'dry'):
             raise ValueError(f'robot_mode 는 real 또는 dry: {self.mode}')
         self.ns = str(d('ns', 'dsr01')).strip('/')
-        self.p = {k: d(k, v) for k, v in DEFAULTS.items()}
+        assets = os.path.join(get_package_share_directory('team_robot'), 'robot_assets')
+        defaults = dict(DEFAULTS, grid_json=os.path.join(assets, 'grid_robot_coordinates.json'))
+        self.p = {k: d(k, v) for k, v in defaults.items()}
         self.p['rotation'] = [float(v) for v in self.p['rotation']]
         self.p['home_joint'] = [float(v) for v in self.p['home_joint']]
-        self.g = {k: d(k, v) for k, v in GRIP_DEFAULTS.items()}
+        grip_defaults = dict(GRIP_DEFAULTS, gripper_drl=os.path.join(assets, 'gripper_drl.py'))
+        self.g = {k: d(k, v) for k, v in grip_defaults.items()}
         self.pos_tol = float(d('pos_tol', 3.0))
         self.declare_parameter('board_revision', 1)      # ros2 param set /team_robot board_revision N (좌표 재확인 후)
         self.auto_standby = bool(d('auto_standby', True))
@@ -116,6 +122,9 @@ class RobotNode(Node):
                                    callback_group=self.group)
 
         log = self.get_logger()
+        log.info(f'[team_robot] 설정 파일: {self.config_source}')
+        log.info(f'[team_robot] 적용값: pick_z={self.p["pick_z"]}, place_z={self.p["place_z"]}, carry_vel={self.p["carry_vel"]}, release={self.g["grip_release_sec"]}sec/{self.g["grip_release_steps"]}steps')
+        log.info(f'[team_robot] 그리퍼 파일: {self.g["gripper_drl"]}')
         log.info(f'[team_robot] 모드={self.mode}, 그리퍼={self.g["gripper_mode"]}, 좌표={self.p["grid_json"]}')
         log.info(f'[team_robot] 대기 위치(공급 위) = ({self.standby_xyz[0]:.1f}, {self.standby_xyz[1]:.1f}, '
                  f'{self.standby_xyz[2]:.1f}), 자세 {self.p["rotation"]}, board_revision={self.revision()}')
@@ -216,7 +225,7 @@ class RobotNode(Node):
         self.tcp, self.tcp_at = list(res.task_pos_info[0].data[:6]), time.monotonic()
         return self.tcp
 
-    def move_line(self, xyz, name=''):
+    def move_line(self, xyz, name='', carry=False):
         target = [float(v) for v in xyz] + self.p['rotation']
         if self.mode == 'dry':
             time.sleep(self.dry_step)
@@ -224,7 +233,7 @@ class RobotNode(Node):
             return
         req = self.MoveLine.Request()
         req.pos = target
-        req.vel = [float(self.p['vel']), float(self.p['vel_rot'])]
+        req.vel = [float(self.p['carry_vel'] if carry else self.p['vel']), float(self.p['vel_rot'])]
         req.acc = [float(self.p['acc']), float(self.p['acc_rot'])]
         req.time = 0.0
         req.radius = 0.0
@@ -266,9 +275,14 @@ class RobotNode(Node):
             path = os.path.expanduser(g['gripper_drl'])
             if not os.path.isfile(path):
                 raise MotionError(f'그리퍼 스크립트 없음: {path}')
-            cmd = 'close' if action == 'close' else 'open'          # omok_pick_place.py 와 같은 인자
+            cmd = 'pos'  # imported gripper script: open/close force 0/700; pos preserves configured widths
+            command = [sys.executable, path, cmd, str(value)]
+            if action == 'open' and float(g['grip_release_sec']) > 0:
+                command += ['--ramp-from', str(int(g['grip_close'])),
+                            '--ramp-seconds', str(float(g['grip_release_sec'])),
+                            '--ramp-steps', str(int(g['grip_release_steps']))]
             try:
-                r = subprocess.run([sys.executable, path, cmd, str(value)], timeout=30)
+                r = subprocess.run(command, timeout=30)
             except subprocess.TimeoutExpired:
                 raise MotionError('gripper_drl.py 시간 초과')
             if r.returncode != 0:
@@ -408,7 +422,7 @@ class RobotNode(Node):
                 xyz = '' if s.xyz is None else f' ({s.xyz[0]:.1f}, {s.xyz[1]:.1f}, {s.xyz[2]:.1f})'
                 log.info(f'[team_robot]   {i}/{len(steps)} {s.name}{xyz}')
                 if s.kind == 'line':
-                    self.move_line(s.xyz, s.name)
+                    self.move_line(s.xyz, s.name, carry=(s.stage == 'MOVING'))
                 else:
                     self.gripper(s.kind)
                 if self.mode == 'dry' and s.kind == 'open':

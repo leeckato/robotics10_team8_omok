@@ -35,22 +35,25 @@ def generate_launch_description():
     L = LaunchConfiguration
     cal = L('calibration')
     return LaunchDescription([
+        DeclareLaunchArgument('robot_params', default_value=PathJoinSubstitution([FindPackageShare('team_robot'), 'config', 'robot_params.yaml'])),
+        DeclareLaunchArgument('gripper_drl', default_value=PathJoinSubstitution([FindPackageShare('team_robot'), 'robot_assets', 'gripper_drl.py'])),
         DeclareLaunchArgument('robot_mode', default_value='dry'),
         DeclareLaunchArgument('gripper_mode', default_value='drl'),
-        DeclareLaunchArgument('grid_json', default_value='~/ros2_ws/board_control/grid_robot_coordinates.json'),
+        DeclareLaunchArgument('grid_json', default_value=PathJoinSubstitution([FindPackageShare('team_robot'), 'robot_assets', 'grid_robot_coordinates.json'])),
         DeclareLaunchArgument('use_hand', default_value='true'),
         DeclareLaunchArgument('gui', default_value='true'),
         DeclareLaunchArgument('calibration', default_value=str(Path.home() / '.config/gomoku/marker_calibration.json')),
         DeclareLaunchArgument('n_playout', default_value='400'),
 
-        # 실제 카메라 (simulation:=false), 모의 상대 없음 (mock_peers:=false)
+        # 실제 카메라와 실물 게임 노드
         include('gomoku_system', 'gomoku.launch.py', {
-            'simulation': 'false', 'mock_peers': 'false', 'use_hand': L('use_hand'),
+            'simulation': 'false', 'use_hand': L('use_hand'),
             'gui': L('gui'), 'calibration': cal}),
         include('team_hand', 'hand.launch.py', {'calibration': cal}, condition=IfCondition(L('use_hand'))),
         Node(package='team_algorithm', executable='algorithm_node', name='team_algorithm', output='screen',
              parameters=[PathJoinSubstitution([FindPackageShare('team_algorithm'), 'config', 'algorithm_params.yaml']),
                          {'n_playout': ParameterValue(L('n_playout'), value_type=int)}]),
         include('team_robot', 'robot.launch.py', {'robot_mode': L('robot_mode'), 'gripper_mode': L('gripper_mode'),
-                                                  'grid_json': L('grid_json')}),
+                                                  'grid_json': L('grid_json'), 'params': L('robot_params'),
+                                                  'gripper_drl': L('gripper_drl')}),
     ])

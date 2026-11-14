@@ -16,12 +16,15 @@ def generate_launch_description():
     params = os.path.join(get_package_share_directory('team_robot'), 'config', 'robot_params.yaml')
     return LaunchDescription([
         DeclareLaunchArgument('params', default_value=params),
+        DeclareLaunchArgument('gripper_drl', default_value=os.path.join(get_package_share_directory('team_robot'), 'robot_assets', 'gripper_drl.py')),
         DeclareLaunchArgument('robot_mode', default_value='dry', description='dry: 로봇 안 움직임 / real: 실제 이동'),
         DeclareLaunchArgument('gripper_mode', default_value='drl'),
-        DeclareLaunchArgument('grid_json', default_value='~/ros2_ws/board_control/grid_robot_coordinates.json'),
+        DeclareLaunchArgument('grid_json', default_value=os.path.join(get_package_share_directory('team_robot'), 'robot_assets', 'grid_robot_coordinates.json')),
         Node(package='team_robot', executable='robot_node', name='team_robot', output='screen',
              parameters=[LaunchConfiguration('params'),
                          {'robot_mode': LaunchConfiguration('robot_mode'),
                           'gripper_mode': LaunchConfiguration('gripper_mode'),
-                          'grid_json': LaunchConfiguration('grid_json')}]),
+                          'grid_json': LaunchConfiguration('grid_json'),
+                          'gripper_drl': LaunchConfiguration('gripper_drl'),
+                          'config_source': LaunchConfiguration('params')}]),
     ])

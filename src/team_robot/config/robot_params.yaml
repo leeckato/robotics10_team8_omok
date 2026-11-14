@@ -3,13 +3,13 @@ team_robot:
   ros__parameters:
     # robot_mode 는 launch 인자로 (기본 dry = 로봇 안 움직임, 실제 이동은 robot_mode:=real)
     ns: dsr01
-    grid_json: "~/ros2_ws/board_control/grid_robot_coordinates.json"   # launch 로 켜면 launch 인자 grid_json 이 우선
     board_revision: 1           # 로봇 좌표를 확인한 비전 board_revision (비전 노드는 1부터 시작)
 
     # ── 자세 / 속도 ──
     rotation: [4.9588, 179.5272, 94.7379]       # 직선 이동 자세 (4.7379 + J6 90도)
     home_joint: [0.0, 0.0, 90.0, 0.0, 90.0, 90.0] # 준비 자세
     vel: 90.0                   # 직선 속도 mm/s (50 x 1.8)
+    carry_vel: 150.0           # 집은 돌을 목표 칸 위로 운반하는 직선 구간만
     vel_rot: 54.0               # 30 x 1.8
     acc: 90.0
     acc_rot: 54.0
@@ -18,8 +18,8 @@ team_robot:
 
     # ── 높이 / 공급 위치 (mm, BASE) ──
     lift: 30.0                  # 이동 높이 = 격자 Z + lift (대기 위치 Z 도 (0,0) Z + lift)
-    place_z: 145.0              # 놓기 Z
-    pick_z: 140.0               # 집기 Z
+    place_z: 140.0              # 놓기 Z
+    pick_z: 157.0               # 집기 Z
     min_z: 139.0                # 이보다 낮은 목표 거부
     supply_x: 273.4
     supply_y: -81.6
@@ -27,8 +27,9 @@ team_robot:
 
     # ── 그리퍼 ──
     gripper_mode: drl           # drl: gripper_drl.py (omok_pick_place --gripper real) / topic: /dsr01/gripper/position_cmd / sim / none
-    gripper_drl: "~/ros2_ws/gripper/gripper_drl.py"
     gripper_topic: /dsr01/gripper/position_cmd
+    grip_release_sec: 2.5      # 착수 때 20단계 위치 명령으로 부드럽게 벌리기
+    grip_release_steps: 20
     grip_close: 630             # 잡기
     grip_open: 550              # 놓기
     grip_wait_pos: 450          # 대기 위치 복귀 후

@@ -17,14 +17,14 @@ N = 8
 
 # omok_pick_place.py 값 (J6 +90도, SPEED_SCALE 1.8)
 DEFAULTS = dict(
-    grid_json='~/ros2_ws/board_control/grid_robot_coordinates.json',
+    grid_json='',  # robot_node/launch resolves the packaged coordinate file
     rotation=[4.9588, 179.5272, 94.7379],         # 4.7379 + 90
     home_joint=[0.0, 0.0, 90.0, 0.0, 90.0, 90.0],
-    vel=90.0, vel_rot=54.0, acc=90.0, acc_rot=54.0,
+    vel=90.0, vel_rot=54.0, acc=90.0, acc_rot=54.0, carry_vel=150.0,
     joint_vel=36.0, joint_acc=36.0,
-    lift=30.0, place_z=145.0, pick_z=140.0,
+    lift=30.0, place_z=140.0, pick_z=157.0,
     supply_x=273.4, supply_y=-81.6,
-    min_z=139.0,                                   # 이보다 낮은 목표는 거부 (집기 Z 140)
+    min_z=139.0,                                   # 이보다 낮은 목표는 거부 (집기 Z 157)
 )
 
 

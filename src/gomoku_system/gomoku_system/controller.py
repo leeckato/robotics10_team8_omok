@@ -12,10 +12,10 @@ from .common import state_qos
 
 class Controller(Node):
     def __init__(self):
-        super().__init__('gomoku_controller');self.sim=bool(self.declare_parameter('simulation',True).value)
+        super().__init__('gomoku_controller');self.sim=False
         self.use_hand=bool(self.declare_parameter('use_hand',False).value)
         self.g=Game();self.phase='READY';self.game_id='';self.turn_id=0;self.notice='시작 대기';self.obs=None;self.obs_at=0;self.robot=None;self.robot_at=0
-        self.hand=None;self.hand_at=0;self.hand_seen=False;self.clear_since=None;self.rid='';self.wait_since=0;self.expected=None;self.epoch=0;self.goal_handle=None;self.bound_revision=None;self.motion_uncertain=False
+        self.hand=None;self.hand_at=0;self.hand_seen=False;self.clear_since=None;self.rid='';self.wait_since=0;self.expected=None;self.epoch=0;self.goal_handle=None;self.bound_revision=None;self.motion_uncertain=False;self.fix_signature=None;self.fix_since=None
         self.pub=self.create_publisher(GameState,'/game/state',state_qos())
         self.create_subscription(BoardObservation,'/vision/observation',self.observe,10)
         self.create_subscription(HandState,'/vision/hand_state',self.hand_event,10)
@@ -27,6 +27,34 @@ class Controller(Node):
         self.inspect_client=self.create_client(Inspect,'/vision/inspect');self.ai=self.create_client(NextMove,'/algorithm/next_move');self.arm=ActionClient(self,PlaceStone,'/robot/place_stone')
         self.create_timer(.1,self.tick)
     def set(self,phase,notice):self.phase=phase;self.notice=notice;self.wait_since=time.monotonic()
+    def wait_for_correction(self,robot,notice):
+        self.rid='';self.hand_seen=False;self.clear_since=None
+        self.fix_signature=None;self.fix_since=None
+        self.set('FIX_ROBOT' if robot else 'FIX_HUMAN',notice+'\n판을 바로잡고 손을 빼면 3초 후 자동 재검사합니다.')
+    def retry_corrected_board(self,now):
+        robot=self.phase=='FIX_ROBOT'
+        if not self.valid_obs() or not self.hand_clear():
+            self.fix_signature=None;self.fix_since=None;return
+        if self.obs.board_revision!=self.bound_revision:
+            self.set('ERROR','보드 좌표가 변경되었습니다. 로봇 좌표 보정 후 새 게임을 시작하세요.');return
+        if self.motion_uncertain or self.goal_handle is not None or (robot and not self.robot_ready()) or (self.robot and time.monotonic()-self.robot_at<2 and self.robot.busy):
+            self.fix_signature=None;self.fix_since=None;return
+        restored=not robot and not self.obs.off_grid_count and list(self.obs.board)==self.g.board
+        try:
+            if not restored:
+                idx=self.g.validate(list(self.obs.board),self.obs.off_grid_count,True)
+                if robot and divmod(idx,8)!=self.expected:raise InvalidMove('로봇 요청 위치와 관측 위치가 다릅니다.')
+        except InvalidMove:
+            self.fix_signature=None;self.fix_since=None;return
+        signature=(tuple(self.obs.board),self.obs.off_grid_count,self.obs.board_revision)
+        if signature!=self.fix_signature:
+            self.fix_signature=signature;self.fix_since=now;return
+        if self.fix_since is None or now-self.fix_since<3:return
+        self.fix_signature=None;self.fix_since=None
+        if restored:
+            self.hand_seen=False;self.clear_since=None
+            self.set('HUMAN','판 복원 확인. 사용자 차례입니다. 돌 한 개를 놓으세요.')
+        else:self.request_inspect(robot=robot)
     def valid_obs(self):return bool(self.obs and time.monotonic()-self.obs_at<1 and self.obs.tracking_valid and self.obs.state_valid and all(v in (0,1,2) for v in self.obs.board))
     def hand_clear(self):return bool(not self.use_hand or (self.hand and self.hand.valid and not self.hand.hand_present and time.monotonic()-self.hand_at<.5))
     def fresh_stamp(self,stamp,max_age):
@@ -58,14 +86,14 @@ class Controller(Node):
         if self.motion_uncertain or self.goal_handle is not None or self.phase in ('ROBOT','SENDING_ROBOT') or (self.robot and (self.robot.busy or (not self.sim and not self.robot.at_standby))):res.message='로봇 동작 또는 복귀 여부 확인 필요';return res
         self.epoch+=1;self.rid='';self.g=Game();self.expected=None;self.set('READY','게임 종료. 판을 비우고 시작하세요.');res.success=True;return res
     def manual(self,req,res):
-        if self.phase!='HUMAN':res.message='사용자 차례에서만 검사 가능';return res
+        if self.phase not in ('HUMAN','FIX_HUMAN'):res.message='사용자 차례에서만 검사 가능';return res
         if self.use_hand and not self.hand_clear():res.message='손 감지 유효/손 없음 확인 필요';return res
         self.set('COUNTDOWN','손을 빼세요. 3초 후 검사합니다.');res.success=True;return res
     def cancel_inspect(self,req,res):
         if self.phase not in ('COUNTDOWN','INSPECT_HUMAN'):res.message='취소할 사용자 검사 없음';return res
         self.rid='';self.clear_since=None;self.hand_seen=False;self.set('HUMAN','검사 취소');res.success=True;return res
     def request_inspect(self,robot=False):
-        if not self.inspect_client.service_is_ready():self.set('ERROR' if robot else 'HUMAN','비전 검사 서비스 미연결');return
+        if not self.inspect_client.service_is_ready():self.wait_for_correction(robot,'비전 검사 서비스 미연결');return
         self.rid=uuid.uuid4().hex;req=Inspect.Request();req.request_id=self.rid;token=self.epoch;rid=self.rid
         self.set('INSPECT_ROBOT' if robot else 'INSPECT_HUMAN','착수 결과 확인 중')
         future=self.inspect_client.call_async(req)
@@ -73,7 +101,7 @@ class Controller(Node):
             if token!=self.epoch or rid!=self.rid:return
             try:
                 if not f.result().accepted:raise RuntimeError(f.result().message)
-            except Exception as e:self.rid='';self.set('ERROR' if robot else 'HUMAN','검사 요청 실패: '+str(e))
+            except Exception as e:self.wait_for_correction(robot,'검사 요청 실패: '+str(e))
         future.add_done_callback(done)
     def observe(self,msg):
         if not self.fresh_stamp(msg.stamp,1):return
@@ -84,13 +112,18 @@ class Controller(Node):
         if self.bound_revision!=msg.board_revision:
             self.rid='';self.set('ERROR','보드 좌표가 변경되었습니다. 로봇 좌표 보정 후 새 게임을 시작하세요.');return
         if not self.hand_clear():return
-        if not self.sim and (not self.robot or time.monotonic()-self.robot_at>2 or self.robot.busy or not self.robot.at_standby):return
+        if not self.sim:
+            # User moves may be validated before robot preparation. Actual motion
+            # still requires robot_ready() in WAIT_ROBOT.
+            robot_fresh = self.robot is not None and time.monotonic()-self.robot_at <= 2
+            if robot and (not robot_fresh or not self.robot.connected or self.robot.busy or not self.robot.at_standby):return
+            if not robot and robot_fresh and self.robot.busy:return
         try:
             idx=self.g.validate(list(msg.board),msg.off_grid_count,True)
             if robot and divmod(idx,8)!=self.expected:raise InvalidMove('로봇 요청 위치와 관측 위치가 다릅니다.')
             self.g.accept(list(msg.board),msg.off_grid_count,True)
         except InvalidMove as e:
-            self.rid='';self.hand_seen=False;self.clear_since=None;self.set('ERROR' if robot else 'HUMAN',str(e));return
+            self.wait_for_correction(robot,str(e));return
         self.rid='';self.expected=None;self.turn_id+=1;self.hand_seen=False;self.clear_since=None
         if self.g.result:self.set('FINISHED','무승부' if self.g.result==3 else '사용자 승리' if self.g.result==self.g.human else '로봇 승리')
         else:self.set('HUMAN' if self.g.turn==self.g.human else 'WAIT_AI','사용자 차례' if self.g.turn==self.g.human else '알고리즘 응답 대기')
@@ -132,6 +165,7 @@ class Controller(Node):
         future.add_done_callback(accepted)
     def tick(self):
         now=time.monotonic()
+        if self.phase in ('FIX_HUMAN','FIX_ROBOT'):self.retry_corrected_board(now)
         if self.phase in ('HUMAN','COUNTDOWN','INSPECT_HUMAN') and self.use_hand:
             if not self.hand or now-self.hand_at>.5 or not self.hand.valid:
                 self.clear_since=None
@@ -142,7 +176,8 @@ class Controller(Node):
         if self.phase=='WAIT_ROBOT' and self.robot_ready() and self.arm.server_is_ready() and self.hand_clear() and self.valid_obs() and self.obs.board_revision==self.bound_revision:self.send_robot()
         if self.phase=='WAIT_VERIFY' and self.robot_ready() and self.hand_clear():self.request_inspect(robot=True)
         if self.phase in ('INSPECT_HUMAN','INSPECT_ROBOT') and now-self.wait_since>8:
-            robot=self.phase=='INSPECT_ROBOT';self.rid='';self.set('ERROR' if robot else 'HUMAN','판 검사 시간 초과: 추적·손·로봇 상태 확인')
+            robot=self.phase=='INSPECT_ROBOT';self.wait_for_correction(robot,'판 검사 시간 초과: 추적·손·로봇 상태 확인')
+        if self.phase=='WAIT_VERIFY' and now-self.wait_since>15:self.wait_for_correction(True,'로봇 복귀 후 판 확인 대기 중')
         if self.phase in ('AI','SENDING_ROBOT','ROBOT','WAIT_VERIFY') and now-self.wait_since>(120 if self.phase=='ROBOT' else 15):self.set('ERROR','연결/작업 시간 초과. 실제 동작 상태를 확인하세요. 자동 재시도하지 않습니다.')
         msg=GameState();msg.stamp=self.get_clock().now().to_msg();msg.game_id=self.game_id;msg.turn_id=self.turn_id;msg.phase=self.phase;msg.board=self.g.board;msg.human_color=self.g.human;msg.to_play=self.g.turn;msg.winner=self.g.result;msg.last_row,msg.last_col=self.g.last if self.g.last else (-1,-1);msg.simulation=self.sim;msg.notice=self.notice;self.pub.publish(msg)
 

@@ -24,7 +24,6 @@ setup(
     entry_points={
         'console_scripts': [
             'hand_node = team_hand.hand_node:main',
-            'video_pub = team_hand.video_pub:main',
         ],
     },
 )

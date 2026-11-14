@@ -1,68 +1,93 @@
-"""Board-wide candidate detection in rectified board coordinates."""
+"""One shared vision pipeline for both calibrate and the ROS vision node."""
+import time,hashlib,json
+from pathlib import Path
 import cv2
 import numpy as np
-from .stone_detection_marker import marker_points, transform_grid, classify_color
+from .stone_detection_marker import marker_points,transform_grid
+from .detection_core import BoardDetector,TemporalBoard
 
 class Vision:
     def __init__(self,calibration):
-        self.cal=calibration;self.previous=None;self.steady=0;self.signature=None;self.count=0
-        d=cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-        p=cv2.aruco.DetectorParameters();p.cornerRefinementMethod=cv2.aruco.CORNER_REFINE_SUBPIX
-        self.detector=cv2.aruco.ArucoDetector(d,p)
-    def reset(self):self.signature=None;self.count=0;self.steady=0;self.previous=None
+        self.cal=calibration;self.n=int(calibration['n']);self.previous=None;self.steady=0;self.grid_filter=None;self.last_good=0.;self.signature=None;self.count=0
+        d=cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50);p=cv2.aruco.DetectorParameters();p.cornerRefinementMethod=cv2.aruco.CORNER_REFINE_SUBPIX
+        self.detector=cv2.aruco.ArucoDetector(d,p);self.objects=BoardDetector(self.n);self.temporal=TemporalBoard(self.n);self.inverse=None;self.reference_error=""
+        reference=calibration.get("reference_path")
+        if reference:
+            try:
+                with np.load(Path(reference).expanduser(),allow_pickle=False) as data:
+                    if str(data["calibration_key"].item())!=self.calibration_key():raise ValueError("mapping differs")
+                    self.objects.reference=data["image"].copy()
+            except (OSError,ValueError,KeyError) as exc:self.reference_error=str(exc)
+    def calibration_key(self):
+        data={k:self.cal[k] for k in ('n','image_size','grid','markers')}
+        return hashlib.sha256(json.dumps(data,sort_keys=True).encode()).hexdigest()
+    def save_reference(self,image,path):
+        if self.grid_filter is None or self.steady<5 or time.monotonic()-self.last_good>.5:raise ValueError('Board tracking is not stable')
+        n=self.n;side=(n-1)*40+49
+        corners=self.grid_filter[[0,n-1,n*n-1,n*(n-1)]].astype(np.float32)
+        dest=np.float32([[24,24],[side-25,24],[side-25,side-25],[24,side-25]])
+        H=cv2.getPerspectiveTransform(corners,dest)
+        reference=cv2.warpPerspective(image,H,(side,side))
+        path=Path(path).expanduser();path.parent.mkdir(parents=True,exist_ok=True)
+        np.savez_compressed(path,image=reference,calibration_key=np.array(self.calibration_key()))
+        self.objects.reference=reference;self.temporal.clear();self.reference_error=''
+        return str(path.resolve())
+    def reset(self):
+        self.signature=None;self.count=0;self.steady=0;self.previous=None;self.grid_filter=None;self.temporal.clear()
+    def request_fresh(self):
+        # Keep visual tracks, but discard vote evidence before a new game request.
+        self.temporal.history.clear();self.signature=None;self.count=0
+    def paint(self,display,tracks,muted=False):
+        if self.inverse is None:return
+        for item in tracks:
+            x0,y0,x1,y1=item['bbox'];poly=cv2.perspectiveTransform(np.float32([[[x0,y0],[x1,y0],[x1,y1],[x0,y1]]]),self.inverse)[0].astype(int)
+            held=muted or item.get('held',False);tint=(110,160,180) if held else (0,0,255) if item['color']=='black' else (255,0,0)
+            cv2.polylines(display,[poly],True,tint,2)
+            label=f"{item['color']} {item['row']},{item['col']}"+(' HOLD' if held else '')
+            cv2.putText(display,label,tuple(poly[0]),cv2.FONT_HERSHEY_SIMPLEX,.35,tint,1)
     def process(self,image,colors,robot_busy=False):
-        markers,display=marker_points(image,self.detector)
-        grid=transform_grid(self.cal,markers);n=self.cal['n'];empty=[0]*(n*n)
-        result=dict(valid=False,tracking=False,board=empty,offgrid=0,reason='마커 확인 중',candidates=[],grid=None)
+        now=time.monotonic();markers,display=marker_points(image,self.detector);grid=transform_grid(self.cal,markers);n=self.n
+        result=dict(valid=False,tracking=False,board=[-1]*(n*n),offgrid=0,reason='마커 확인 중',candidates=[],grid=None)
+        tracks=[dict(t,confirmed=True) for k,t in self.temporal.tracks.items() if self.temporal.confirmed.get(k)==t['color']]
         if grid is None:
-            self.reset();result['reason']='마커 4개를 모두 확인할 수 없습니다.';return display,result
+            if now-self.last_good<.5:self.paint(display,tracks,muted=True)
+            else:self.reset()
+            result['reason']='마커 가림: 관측 무효';return display,result
         h,w=image.shape[:2]
         if not np.all((grid[:,0]>0)&(grid[:,0]<w-1)&(grid[:,1]>0)&(grid[:,1]<h-1)):
-            self.reset();result['reason']='보드가 영상 범위를 벗어났습니다.';return display,result
-        result.update(tracking=True,grid=grid.tolist())
+            self.reset();result['reason']='보드 영상 범위 이탈';return display,result
         step=float(np.median(np.linalg.norm(np.diff(grid.reshape(n,n,2),axis=1),axis=2)))
-        motion=np.inf if self.previous is None else np.max(np.linalg.norm(grid-self.previous,axis=1))
-        self.previous=grid.copy();self.steady=self.steady+1 if motion<max(.8,.04*step) else 0
-        for x,y in grid:cv2.circle(display,(round(x),round(y)),2,(0,180,0),-1)
-        if robot_busy or self.steady<10 or not all(k in colors for k in ('black','white')):
-            self.count=0;self.signature=None
-            result['reason']='로봇 동작 중: 판정 보류' if robot_busy else ('보드 위치 안정화 중' if self.steady<10 else 'B/W 버튼으로 기준 색을 등록하세요.')
+        movement=np.inf if self.previous is None else float(np.max(np.linalg.norm(grid-self.previous,axis=1)))
+        moved=self.grid_filter is not None and np.max(np.linalg.norm(grid-self.grid_filter,axis=1))>max(3,step*.2)
+        self.steady=self.steady+1 if movement<max(1.5,step*.12) else 0
+        if moved:self.temporal.clear();self.grid_filter=grid.copy();self.steady=0
+        if self.grid_filter is None:self.grid_filter=grid.copy()
+        else:self.grid_filter=.75*self.grid_filter+.25*grid
+        self.previous=grid.copy();self.last_good=now;result.update(tracking=True,grid=grid.tolist())
+        for x,y in self.grid_filter:cv2.circle(display,(round(x),round(y)),2,(0,180,0),-1)
+        if robot_busy or self.steady<5:
+            self.paint(display,tracks,muted=True);result['reason']='로봇 동작 중: 관측 무효' if robot_busy else '보드 안정화 중';return display,result
+        corners=self.grid_filter[[0,n-1,n*n-1,n*(n-1)]].astype(np.float32);side=(n-1)*40+49
+        dest=np.float32([[24,24],[side-25,24],[side-25,side-25],[24,side-25]])
+        H=cv2.getPerspectiveTransform(corners,dest);self.inverse=np.linalg.inv(H)
+        warped=cv2.warpPerspective(image,H,(side,side))
+        # A new marker calibration invalidates the old empty reference. Never
+        # publish guessed occupancy as a valid game observation during bootstrap.
+        if self.objects.reference is None:
+            self.temporal.clear()
+            result.update(reason='빈 판 기준 필요: 판을 비우고 calibrate에서 E 두 번',reference_used=False,reference_error=self.reference_error)
             return display,result
-        corners=grid[[0,n-1,n*n-1,n*(n-1)]].astype(np.float32)
-        scale=40.;margin=24;side=int((n-1)*scale+2*margin+1)
-        dest=np.float32([[margin,margin],[side-margin-1,margin],[side-margin-1,side-margin-1],[margin,side-margin-1]])
-        H=cv2.getPerspectiveTransform(corners,dest);inv=np.linalg.inv(H)
-        warp=cv2.warpPerspective(image,H,(side,side));gray=cv2.cvtColor(warp,cv2.COLOR_BGR2GRAY)
-        blur=cv2.GaussianBlur(gray,(5,5),1)
-        circles=cv2.HoughCircles(blur,cv2.HOUGH_GRADIENT,1,16,param1=60,param2=18,minRadius=6,maxRadius=18)
-        edges=cv2.dilate(cv2.Canny(blur,30,60),np.ones((3,3),np.uint8))
-        board=[0]*(n*n);offgrid=0;uncertain=False;candidates=[]
-        if circles is not None:
-            for x,y,r in circles[0]:
-                angle=np.linspace(0,2*np.pi,96,endpoint=False)
-                ex=np.rint(x+r*np.cos(angle)).astype(int);ey=np.rint(y+r*np.sin(angle)).astype(int)
-                ok=(ex>=0)&(ex<side)&(ey>=0)&(ey<side)
-                if ok.mean()<.95 or (edges[ey[ok],ex[ok]]>0).mean()<.55:continue
-                c=int(round((x-margin)/scale));row=int(round((y-margin)/scale))
-                distance=float(np.hypot(x-(margin+c*scale),y-(margin+row*scale)))
-                candidate=dict(center=[float(x),float(y)],radius=float(r),row=row,col=c)
-                color=classify_color(warp,candidate,colors);candidate['color']=color
-                mapped=0<=row<n and 0<=c<n and distance<=scale*.28
-                candidate['mapped']=mapped
-                if color=='unknown':uncertain=True
-                if not mapped:offgrid+=1
-                elif color!='unknown':
-                    idx=row*n+c
-                    if board[idx]:uncertain=True
-                    board[idx]=1 if color=='black' else 2
-                pts=np.float32([[[x-r,y-r],[x+r,y-r],[x+r,y+r],[x-r,y+r]]])
-                poly=cv2.perspectiveTransform(pts,inv)[0].astype(int)
-                tint=(0,0,255) if color=='black' else (255,0,0) if color=='white' else (0,180,255)
-                cv2.polylines(display,[poly],True,tint,1)
-                cv2.putText(display,f'{color} {row},{c}',tuple(poly[0]),0,.35,tint,1)
-                candidates.append(candidate)
-        signature=(tuple(board),offgrid,uncertain)
+        items,outside,unknown=self.objects.detect(warped,colors)
+        board,visible,valid=self.temporal.update(items,len(outside),bool(unknown))
+        # Off-grid candidate is a valid observed error if its appearance is stable;
+        # it must reach game.validate() instead of timing out without an explanation.
+        signature=(tuple((v['row'],v['col'],v['color']) for v in sorted(items,key=lambda v:(v['row'],v['col']))),len(outside),len(unknown))
         self.count=self.count+1 if signature==self.signature else 1;self.signature=signature
-        result.update(board=board,offgrid=offgrid,candidates=candidates,valid=self.count>=5 and not uncertain,
-                      reason='관측 안정' if self.count>=5 and not uncertain else '돌 관측 안정화 중 / 색 불확실')
+        if outside and self.count>=5 and not unknown:valid=not any(t.get('held') for t in visible)
+        self.paint(display,visible)
+        for item in outside:
+            poly=cv2.perspectiveTransform(np.float32([[[item['bbox'][0],item['bbox'][1]],[item['bbox'][2],item['bbox'][3]]]]),self.inverse)[0].astype(int)
+            cv2.rectangle(display,tuple(poly[0]),tuple(poly[1]),(0,180,255),1)
+        reason=('관측 안정 · 백돌 객체 검출 v4' if self.objects.reference is not None else '관측 안정 · 상대 대비') if valid else '관측 재확인 중 (화면 유지와 실제 판정은 별도)'
+        result.update(valid=valid,board=board,offgrid=len(outside),reason=reason,candidates=items,display_tracks=visible,unknown_candidates=unknown,reference_used=self.objects.reference is not None,reference_error=self.reference_error)
         return display,result

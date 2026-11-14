@@ -1,8 +1,0 @@
-31c31
-<         self.board=list(observed);self.human=human;self.turn=1;self.result=0;self.last=None
----
->         self.board=[int(v) for v in observed];self.human=human;self.turn=1;self.result=0;self.last=None
-49c49
-<         self.board=list(observed);self.last=divmod(idx,self.n);self.result=winner(self.board,self.n)
----
->         self.board=[int(v) for v in observed];self.last=divmod(idx,self.n);self.result=winner(self.board,self.n)  # int(): ROS int8 배열(numpy)이 GameState.winner 로 가면 controller 가 죽음

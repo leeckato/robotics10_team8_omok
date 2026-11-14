@@ -16,8 +16,6 @@
   <exec_depend>python3-numpy</exec_depend>
   <!-- OpenCV(4.8 이상)는 gomoku 가상환경의 pip 버전을 사용. apt python3-opencv(4.6)를 rosdep 으로 추가 설치하지 않도록 선언하지 않음 -->
 
-  <test_depend>python3-pytest</test_depend>
-
   <export>
     <build_type>ament_python</build_type>
   </export>

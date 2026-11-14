@@ -1,0 +1,7 @@
+white_objects_v4
+pick_z=157.0
+place_z=140.0
+board_correction_auto_reinspect=true
+carry_vel=150.0
+grip_release_sec=2.5
+grip_release_steps=20
